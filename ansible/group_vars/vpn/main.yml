@@ -1,0 +1,13 @@
+---
+vpn_interface: wg0
+vpn_port: 51820
+vpn_subnet_cidr: 10.66.66.0/24
+vpn_server_address: 10.66.66.1/24
+vpn_dns: 1.1.1.1
+vpn_clients:
+  - name: windows-desktop
+    address: 10.66.66.2/32
+  - name: macbook
+    address: 10.66.66.3/32
+  - name: phone
+    address: 10.66.66.4/32

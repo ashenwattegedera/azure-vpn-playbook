@@ -1,0 +1,13 @@
+[Interface]
+Address = {{ vpn_server_address }}
+ListenPort = {{ vpn_port }}
+PrivateKey = {{ server_private_key }}
+SaveConfig = false
+PostUp = iptables -I FORWARD 1 -i %i -j ACCEPT; iptables -I FORWARD 1 -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -s {{ vpn_subnet_cidr }} -o {{ vpn_uplink_interface }} -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -s {{ vpn_subnet_cidr }} -o {{ vpn_uplink_interface }} -j MASQUERADE
+{% for client in active_vpn_clients %}
+[Peer]
+# {{ client.name }}
+PublicKey = {{ client.public_key }}
+AllowedIPs = {{ client.address }}
+{% endfor %}

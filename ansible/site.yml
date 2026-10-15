@@ -1,0 +1,111 @@
+---
+- name: Configure WireGuard VPN server
+  hosts: vpn
+  become: true
+  gather_facts: true
+  vars_files:
+    - group_vars/vpn/main.yml
+  pre_tasks:
+    - name: Ensure local WireGuard tools are installed for peer key generation
+      ansible.builtin.command: wg --version
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      check_mode: false
+
+    - name: Create local secret directory
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../secrets/clients"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+
+    - name: Generate client private keys only when absent
+      ansible.builtin.shell: |
+        set -eu
+        umask 077
+        wg genkey > {{ (playbook_dir ~ '/../secrets/clients/' ~ item.name ~ '.key') | quote }}
+      args:
+        creates: "{{ playbook_dir }}/../secrets/clients/{{ item.name }}.key"
+      loop: "{{ vpn_clients }}"
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Derive client public keys
+      ansible.builtin.shell: |
+        set -eu
+        wg pubkey < {{ (playbook_dir ~ '/../secrets/clients/' ~ item.name ~ '.key') | quote }}
+      loop: "{{ vpn_clients }}"
+      register: client_public_key_results
+      changed_when: false
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+    - name: Attach client public keys to client definitions
+      ansible.builtin.set_fact:
+        vpn_clients_with_keys: "{{ vpn_clients_with_keys | default([]) + [item.item | combine({'public_key': item.stdout})] }}"
+      loop: "{{ client_public_key_results.results }}"
+      no_log: true
+
+  roles:
+    - hardening
+    - wireguard
+
+  post_tasks:
+    - name: Read server public key
+      ansible.builtin.slurp:
+        src: /etc/wireguard/server_public.key
+      register: server_public_key_file
+      no_log: true
+
+    - name: Save server public key as a host fact
+      ansible.builtin.set_fact:
+        server_public_key: "{{ server_public_key_file.content | b64decode | trim }}"
+      no_log: true
+
+    - name: Verify WireGuard service is enabled
+      ansible.builtin.command: systemctl is-enabled wg-quick@wg0
+      changed_when: false
+
+    - name: Verify WireGuard interface is active
+      ansible.builtin.command: wg show wg0
+      changed_when: false
+
+- name: Render client profiles on the WSL control node
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - group_vars/vpn/main.yml
+  vars:
+    server_host: azure-vpn
+    vpn_endpoint: "{{ hostvars[server_host].ansible_host }}"
+    server_public_key: "{{ hostvars[server_host].server_public_key }}"
+  tasks:
+    - name: Ensure client output directory is private
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../secrets/clients"
+        state: directory
+        mode: '0700'
+
+    - name: Render each client profile
+      ansible.builtin.template:
+        src: templates/client.conf.j2
+        dest: "{{ playbook_dir }}/../secrets/clients/{{ item.name }}.conf"
+        mode: '0600'
+      loop: "{{ vpn_clients }}"
+      vars:
+        client: "{{ item }}"
+        client_private_key: "{{ lookup('file', playbook_dir ~ '/../secrets/clients/' ~ item.name ~ '.key') | trim }}"
+      no_log: true
+
+    - name: Generate QR code for phone profile when qrencode is installed
+      ansible.builtin.shell: >-
+        qrencode -o {{ (playbook_dir ~ '/../secrets/clients/' ~ item.name ~ '.png') | quote }}
+        < {{ (playbook_dir ~ '/../secrets/clients/' ~ item.name ~ '.conf') | quote }}
+      loop: "{{ vpn_clients | selectattr('name', 'equalto', 'phone') | list }}"
+      changed_when: false
+      failed_when: false

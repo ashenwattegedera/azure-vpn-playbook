@@ -1,0 +1,8 @@
+.venv/
+*.retry
+ansible/inventory.ini
+secrets/**
+!secrets/clients/.gitkeep
+*.conf
+*.png
+.DS_Store

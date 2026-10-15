@@ -1,0 +1,53 @@
+---
+- name: Update apt package cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install security and network packages
+  ansible.builtin.apt:
+    name:
+      - wireguard
+      - wireguard-tools
+      - ufw
+      - iptables
+      - unattended-upgrades
+    state: present
+
+- name: Configure unattended security upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+- name: Allow SSH from configured management CIDR in UFW
+  community.general.ufw:
+    rule: allow
+    port: '22'
+    proto: tcp
+    from_ip: "{{ lookup('env', 'SSH_ALLOWED_CIDR') }}"
+  when: lookup('env', 'SSH_ALLOWED_CIDR') | length > 0
+
+- name: Allow WireGuard UDP port in UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ vpn_port }}"
+    proto: udp
+
+- name: Set UFW default incoming policy
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Set UFW default outgoing policy
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled

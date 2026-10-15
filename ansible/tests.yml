@@ -1,0 +1,35 @@
+---
+- name: Validate VPN server configuration
+  hosts: vpn
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check WireGuard service is active
+      ansible.builtin.command: systemctl is-active wg-quick@wg0
+      register: service_state
+      changed_when: false
+      failed_when: service_state.stdout != 'active'
+
+    - name: Check interface and listen port
+      ansible.builtin.command: wg show wg0
+      register: wg_status
+      changed_when: false
+      failed_when: "'listening port: 51820' not in wg_status.stdout"
+
+    - name: Check IPv4 forwarding is enabled
+      ansible.builtin.command: sysctl -n net.ipv4.ip_forward
+      register: forwarding
+      changed_when: false
+      failed_when: forwarding.stdout != '1'
+
+    - name: Check UFW is active
+      ansible.builtin.command: ufw status
+      register: ufw_status
+      changed_when: false
+      failed_when: "'Status: active' not in ufw_status.stdout"
+
+    - name: Check server configuration permissions
+      ansible.builtin.stat:
+        path: /etc/wireguard/wg0.conf
+      register: server_config
+      failed_when: not server_config.stat.exists or server_config.stat.mode != '0600'
